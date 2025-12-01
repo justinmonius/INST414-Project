@@ -10,7 +10,7 @@ This version:
 - Includes performance and usage features: nb_in_group, nb_on_pitch, goal_contrib, etc.
 - Trains Baseline, Linear Regression, Ridge, Random Forest, and Gradient Boosting.
 - Evaluates with R², RMSE, MAE (in euros).
-- Saves models to models/ and metrics to results/metrics.json.
+- Saves metrics to results/metrics.json (no model artifacts are written).
 """
 
 from pathlib import Path
@@ -27,16 +27,13 @@ from sklearn.pipeline import Pipeline
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from sklearn.linear_model import LinearRegression, Ridge
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
-import joblib
 
 
 # -------- Paths -------- #
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_PATH = PROJECT_ROOT / "data" / "processed" / "merged_players_dataset.csv"
-MODELS_DIR = PROJECT_ROOT / "models"
 RESULTS_DIR = PROJECT_ROOT / "results"
 
-MODELS_DIR.mkdir(exist_ok=True, parents=True)
 RESULTS_DIR.mkdir(exist_ok=True, parents=True)
 
 
@@ -92,7 +89,7 @@ def load_and_prepare_data():
     if "goals" in df.columns and "assists" in df.columns:
         df["goal_contrib"] = df["goals"] + df["assists"]
 
-    # ---- Target-like encodings: mean market value by club and country ---- #
+    # Mean market value by club
     if "current_club_name" in df.columns:
         club_means = (
             df.groupby("current_club_name")["market_value_eur"]
@@ -108,6 +105,7 @@ def load_and_prepare_data():
     else:
         df["club_mean_value"] = np.nan
 
+    # Mean market value by country of birth
     if "country_of_birth" in df.columns:
         country_means = (
             df.groupby("country_of_birth")["market_value_eur"]
@@ -128,7 +126,7 @@ def load_and_prepare_data():
     df["club_mean_value"] = df["club_mean_value"].fillna(global_mean)
     df["country_mean_value"] = df["country_mean_value"].fillna(global_mean)
 
-    # -------- Feature set -------- #
+    # Feature set
     candidate_features = [
         "age",
         "position",          # categorical (low cardinality)
@@ -141,8 +139,8 @@ def load_and_prepare_data():
         "clean_sheets",
         "days_missed",
         "height",
-        "club_mean_value",      # numeric encoding
-        "country_mean_value",   # numeric encoding
+        "club_mean_value",
+        "country_mean_value",
     ]
 
     feature_cols = [c for c in candidate_features if c in df.columns]
@@ -200,7 +198,7 @@ def main():
     )
     print(f"Splits -> train={len(X_train)}, val={len(X_val)}, test={len(X_test)}")
 
-    # ----- Baseline: predict mean of train ----- #
+    # Baseline: predict mean of train
     baseline_mean = float(y_train.mean())
 
     baseline_train_log = np.full_like(y_train, baseline_mean)
@@ -224,7 +222,7 @@ def main():
         }
     }
 
-    # ----- Models with tuned-ish hyperparameters ----- #
+    # Models with tuned-ish hyperparameters
     models = {
         "linear_regression": LinearRegression(),
         "ridge": Ridge(alpha=1.0),
@@ -280,10 +278,6 @@ def main():
         print("Train:", metrics_train)
         print("Val  :", metrics_val)
         print("Test :", metrics_test)
-
-        model_path = MODELS_DIR / f"{name}_log_target.joblib"
-        joblib.dump(pipeline, model_path)
-        print("Saved model to:", model_path)
 
     # Save all metrics
     metrics_path = RESULTS_DIR / "metrics.json"
