@@ -3,14 +3,6 @@ train.py
 
 Train regression models to predict soccer player market value.
 
-This version:
-- Uses engineered numeric encodings for current_club_name and country_of_birth
-  via mean market value (target-like encoding).
-- Reduces categorical cardinality: only 'position' is one-hot encoded.
-- Includes performance and usage features: nb_in_group, nb_on_pitch, goal_contrib, etc.
-- Trains Baseline, Linear Regression, Ridge, Random Forest, and Gradient Boosting.
-- Evaluates with R², RMSE, MAE (in euros).
-- Saves metrics to results/metrics.json (no model artifacts are written).
 """
 
 from pathlib import Path
@@ -29,7 +21,7 @@ from sklearn.linear_model import LinearRegression, Ridge
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 
 
-# -------- Paths -------- #
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_PATH = PROJECT_ROOT / "data" / "processed" / "merged_players_dataset.csv"
 RESULTS_DIR = PROJECT_ROOT / "results"
@@ -37,13 +29,9 @@ RESULTS_DIR = PROJECT_ROOT / "results"
 RESULTS_DIR.mkdir(exist_ok=True, parents=True)
 
 
-# -------- Metrics helper -------- #
+
 def compute_metrics(y_true_log, y_pred_log):
-    """
-    Compute R², RMSE, MAE in original euro scale.
-    Inputs are log1p(market_value_eur).
-    Returns plain Python floats so they can be JSON-serialized.
-    """
+    
     y_true = np.expm1(y_true_log)
     y_pred = np.expm1(y_pred_log)
 
@@ -55,41 +43,32 @@ def compute_metrics(y_true_log, y_pred_log):
     return {"r2": r2, "rmse": rmse, "mae": mae}
 
 
-# -------- Data loading & preparation -------- #
+
 def load_and_prepare_data():
-    """
-    Load merged dataset, engineer features, and return X, y_log, feature_cols.
-    Applies:
-    - Filtering to positive market values
-    - Age calculation (if needed)
-    - goal_contrib = goals + assists
-    - target-like encodings for current_club_name and country_of_birth:
-      mean market_value_eur by club and by country
-    """
+    
     df = pd.read_csv(DATA_PATH)
 
-    # Filter to players with a positive market value
+    
     df = df[df["market_value_eur"] > 0]
 
-    # Standardize text columns
+    
     for col in ["current_club_name", "position", "country_of_birth"]:
         if col in df.columns:
             df[col] = df[col].astype(str).str.strip().str.lower()
 
-    # Compute age if needed
+    
     if "age" not in df.columns and "date_of_birth" in df.columns:
         df["date_of_birth"] = pd.to_datetime(df["date_of_birth"], errors="coerce")
         df["age"] = datetime.now().year - df["date_of_birth"].dt.year
 
-    # Restrict to reasonable ages
+    
     if "age" in df.columns:
         df = df[df["age"].between(16, 42)]
 
-    # Compute goal contributions
+    
     if "goals" in df.columns and "assists" in df.columns:
         df["goal_contrib"] = df["goals"] + df["assists"]
 
-    # Mean market value by club
     if "current_club_name" in df.columns:
         club_means = (
             df.groupby("current_club_name")["market_value_eur"]
@@ -105,7 +84,6 @@ def load_and_prepare_data():
     else:
         df["club_mean_value"] = np.nan
 
-    # Mean market value by country of birth
     if "country_of_birth" in df.columns:
         country_means = (
             df.groupby("country_of_birth")["market_value_eur"]
@@ -121,15 +99,14 @@ def load_and_prepare_data():
     else:
         df["country_mean_value"] = np.nan
 
-    # If any encodings are missing, fill with global mean
     global_mean = df["market_value_eur"].mean()
     df["club_mean_value"] = df["club_mean_value"].fillna(global_mean)
     df["country_mean_value"] = df["country_mean_value"].fillna(global_mean)
 
-    # Feature set
+   
     candidate_features = [
         "age",
-        "position",          # categorical (low cardinality)
+        "position",          
         "goals",
         "assists",
         "goal_contrib",
@@ -146,7 +123,7 @@ def load_and_prepare_data():
     feature_cols = [c for c in candidate_features if c in df.columns]
     target_col = "market_value_eur"
 
-    # Drop rows with missing values in features or target
+  
     df = df.dropna(subset=[target_col] + feature_cols)
 
     X = df[feature_cols].copy()
@@ -156,13 +133,9 @@ def load_and_prepare_data():
     return X, y_log, feature_cols
 
 
-# -------- Preprocessor -------- #
+
 def build_preprocessor(feature_cols):
-    """
-    Build a ColumnTransformer:
-    - numeric features -> StandardScaler
-    - position (only) -> OneHotEncoder
-    """
+    
     categorical_features = [c for c in feature_cols if c == "position"]
     numeric_features = [c for c in feature_cols if c not in categorical_features]
 
@@ -179,7 +152,7 @@ def build_preprocessor(feature_cols):
     return preprocessor, numeric_features, categorical_features
 
 
-# -------- Main training pipeline -------- #
+
 def main():
     print(f"Loading data from: {DATA_PATH}")
     X, y_log, feature_cols = load_and_prepare_data()
@@ -189,7 +162,7 @@ def main():
     print("Numeric features:", numeric_features)
     print("Categorical features:", categorical_features)
 
-    # 70 / 15 / 15 split
+   
     X_trainval, X_test, y_trainval, y_test = train_test_split(
         X, y_log, test_size=0.15, random_state=42
     )
@@ -198,7 +171,7 @@ def main():
     )
     print(f"Splits -> train={len(X_train)}, val={len(X_val)}, test={len(X_test)}")
 
-    # Baseline: predict mean of train
+   
     baseline_mean = float(y_train.mean())
 
     baseline_train_log = np.full_like(y_train, baseline_mean)
@@ -222,7 +195,7 @@ def main():
         }
     }
 
-    # Models with tuned-ish hyperparameters
+  
     models = {
         "linear_regression": LinearRegression(),
         "ridge": Ridge(alpha=1.0),
@@ -257,15 +230,15 @@ def main():
 
         pipeline.fit(X_train, y_train)
 
-        # Train metrics
+        
         y_train_pred_log = pipeline.predict(X_train)
         metrics_train = compute_metrics(y_train, y_train_pred_log)
 
-        # Validation metrics
+        
         y_val_pred_log = pipeline.predict(X_val)
         metrics_val = compute_metrics(y_val, y_val_pred_log)
 
-        # Test metrics
+        
         y_test_pred_log = pipeline.predict(X_test)
         metrics_test = compute_metrics(y_test, y_test_pred_log)
 
@@ -279,7 +252,7 @@ def main():
         print("Val  :", metrics_val)
         print("Test :", metrics_test)
 
-    # Save all metrics
+   
     metrics_path = RESULTS_DIR / "metrics.json"
     with open(metrics_path, "w") as f:
         json.dump(all_metrics, f, indent=4)
@@ -290,4 +263,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-    #test
+    
